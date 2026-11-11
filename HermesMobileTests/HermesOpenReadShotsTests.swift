@@ -61,7 +61,7 @@ final class HermesOpenReadShotsTests: XCTestCase {
         // The runner is slow and the fix is not instant: give the read a generous window, and
         // record when the rows arrived so the sheet can say how long the open took.
         let started = ContinuousClock().now
-        try await waitUntil("the transcript to show the settled rows", timeout: .seconds(20)) {
+        try await waitUntil("the transcript to show the settled rows", fail: false) {
             !open.model.displayedTranscriptMessages.isEmpty
         }
         let elapsed = started.duration(to: ContinuousClock().now)
@@ -188,11 +188,19 @@ final class HermesOpenReadShotsTests: XCTestCase {
 
     private func settle(_ window: UIWindow, passes: Int = 4) async throws {
         for _ in 0..<passes {
-            try await Task.sleep(for: .milliseconds(80))
+            try await turn()
             window.layoutIfNeeded()
             _ = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
                 window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
             }
+        }
+    }
+
+    /// One turn of the main queue: enough for a reply already in flight to land, and no
+    /// wall-clock sleep to wait out a state that has its own signal.
+    private func turn() async throws {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
         }
     }
 
@@ -204,14 +212,13 @@ final class HermesOpenReadShotsTests: XCTestCase {
         try data.write(to: directory.appendingPathComponent("\(name).png"))
     }
 
-    private func waitUntil(_ what: String, timeout: Duration = .seconds(10),
+    private func waitUntil(_ what: String, turns: Int = 600, fail: Bool = true,
                            _ condition: @MainActor () -> Bool) async throws {
-        let deadline = ContinuousClock().now + timeout
-        while ContinuousClock().now < deadline {
+        for _ in 0..<turns {
             if condition() { return }
-            try await Task.sleep(for: .milliseconds(20))
+            try await turn()
         }
-        XCTFail("timed out waiting for \(what)")
+        if fail { XCTFail("timed out waiting for \(what)") }
     }
 
     /// The transcript pages the scripted host serves, by offset, and the offsets it was asked for.
