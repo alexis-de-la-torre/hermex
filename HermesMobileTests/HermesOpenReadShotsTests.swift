@@ -97,6 +97,7 @@ final class HermesOpenReadShotsTests: XCTestCase {
 
     // MARK: The chat
 
+    @MainActor
     private struct Open {
         let model: ChatViewModel
         let engine: HermesConversation
