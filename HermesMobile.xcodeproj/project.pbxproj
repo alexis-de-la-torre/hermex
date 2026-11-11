@@ -221,6 +221,7 @@
 		C04600000000000000000003 /* ChatStreamCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C04600000000000000000004 /* ChatStreamCoordinatorTests.swift */; };
 		E1010000000000000000A003 /* HermesChatTurnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1010000000000000000A004 /* HermesChatTurnTests.swift */; };
 		E1047000000000000000A003 /* HermesTranscriptPagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1047000000000000000A004 /* HermesTranscriptPagingTests.swift */; };
+		AA0200000000000000000B01 /* HermesOpenReadShotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200000000000000000B02 /* HermesOpenReadShotsTests.swift */; };
 		E1054000000000000000A003 /* HermesOfflineCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1054000000000000000A004 /* HermesOfflineCacheTests.swift */; };
 		E1049000000000000000A003 /* HermesHistoryRewindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1049000000000000000A004 /* HermesHistoryRewindTests.swift */; };
 		E1050000000000000000A003 /* HermesCompressClearTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1050000000000000000A004 /* HermesCompressClearTests.swift */; };
@@ -960,6 +961,7 @@
 		E1047000000000000000A002 /* HermesTranscriptHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesTranscriptHistory.swift; sourceTree = "<group>"; };
 		E1010000000000000000A004 /* HermesChatTurnTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesChatTurnTests.swift; sourceTree = "<group>"; };
 		E1047000000000000000A004 /* HermesTranscriptPagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesTranscriptPagingTests.swift; sourceTree = "<group>"; };
+		AA0200000000000000000B02 /* HermesOpenReadShotsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesOpenReadShotsTests.swift; sourceTree = "<group>"; };
 		E1054000000000000000A004 /* HermesOfflineCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesOfflineCacheTests.swift; sourceTree = "<group>"; };
 		E1049000000000000000A004 /* HermesHistoryRewindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesHistoryRewindTests.swift; sourceTree = "<group>"; };
 		E1050000000000000000A004 /* HermesCompressClearTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesCompressClearTests.swift; sourceTree = "<group>"; };
@@ -1674,6 +1676,7 @@
 					C04600000000000000000004 /* ChatStreamCoordinatorTests.swift */,
 					E1010000000000000000A004 /* HermesChatTurnTests.swift */,
 					E1047000000000000000A004 /* HermesTranscriptPagingTests.swift */,
+					AA0200000000000000000B02 /* HermesOpenReadShotsTests.swift */,
 					E1054000000000000000A004 /* HermesOfflineCacheTests.swift */,
 					E1049000000000000000A004 /* HermesHistoryRewindTests.swift */,
 					E1050000000000000000A004 /* HermesCompressClearTests.swift */,
@@ -3247,6 +3250,7 @@
 					C04600000000000000000003 /* ChatStreamCoordinatorTests.swift in Sources */,
 					E1010000000000000000A003 /* HermesChatTurnTests.swift in Sources */,
 					E1047000000000000000A003 /* HermesTranscriptPagingTests.swift in Sources */,
+					AA0200000000000000000B01 /* HermesOpenReadShotsTests.swift in Sources */,
 					E1054000000000000000A003 /* HermesOfflineCacheTests.swift in Sources */,
 					E1049000000000000000A003 /* HermesHistoryRewindTests.swift in Sources */,
 					E1050000000000000000A003 /* HermesCompressClearTests.swift in Sources */,

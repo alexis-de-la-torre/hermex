@@ -62,6 +62,9 @@ jobs:
           # camera, the tree is what differs.
           cp "$GITHUB_WORKSPACE/HermesMobileTests/HermesOpenReadShotsTests.swift" \
              "$PWD/tree-before/HermesMobileTests/"
+          # The test target lists its sources one by one, so the test arrives with its entry.
+          cp "$GITHUB_WORKSPACE/$PROJECT_PATH/project.pbxproj" \
+             "$PWD/tree-before/$PROJECT_PATH/project.pbxproj"
 
       - name: Shoot the base tree
         continue-on-error: true
@@ -102,6 +105,11 @@ jobs:
           echo "container: $CONTAINER"
           if [ -n "$CONTAINER" ]; then cp -R "$CONTAINER/tmp/after/." sheet/after/ 2>/dev/null || true; fi
           ls -l sheet/after || true
+          if [ ! -f sheet/after/01-open.png ]; then
+            echo "::error::the pull request's run shot no frames — the test did not run, or it crashed"
+            grep -E "Test Case|error:|Executed|TEST FAILED" after-test.log | tail -30 || true
+            exit 1
+          fi
 
       - name: Stitch the sheet
         if: always()

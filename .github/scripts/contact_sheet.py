@@ -124,10 +124,12 @@ def caption_for(notes: dict, moment: str) -> str:
     seconds = entry.get("seconds", 0.0)
     connected = entry.get("connected", False)
     reads = len(entry.get("offsets", []))
-    state = "socket connected" if connected else "socket still recovering"
     reads_label = "read" if reads == 1 else "reads"
     if moment == "open":
-        return f"{rows} rows at t+{seconds:.2f}s · {state} · {reads} transcript {reads_label}"
+        if not rows:
+            return f"0 rows · socket still recovering · nothing to show until the handshake ends · {reads} transcript {reads_label}"
+        return f"{rows} rows at t+{seconds:.2f}s · socket still recovering · {reads} transcript {reads_label}"
+    state = "socket connected" if connected else "socket still recovering"
     return f"{rows} rows · {state} · {reads} transcript {reads_label}"
 
 
