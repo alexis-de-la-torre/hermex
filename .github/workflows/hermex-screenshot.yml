@@ -1,0 +1,93 @@
+name: Hermex screenshot
+
+# Fork-only workflow: build Hermex on GitHub's hosted Xcode 27 runner (free for
+# public repositories), boot an iPhone 17 simulator, launch the app and upload
+# screenshots. Nothing here talks to upstream; it exists so the app can be seen
+# running without owning a Mac.
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    name: Build and screenshot
+    runs-on: xcode-27
+    timeout-minutes: 70
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      PROJECT_PATH: HermesMobile.xcodeproj
+      SCHEME: HermesMobile
+      BUNDLE_ID: com.uzairansar.hermesmobile
+      DEVICE_NAME: iPhone 17
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available -j \
+            | jq -r --arg n "$DEVICE_NAME" '.devices | to_entries[] | .value[]
+                     | select(.name == $n) | .udid' | head -1)
+          if [ -z "$UDID" ]; then
+            echo "No $DEVICE_NAME simulator; available devices:"
+            xcrun simctl list devices available | head -40
+            exit 1
+          fi
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices | grep -i booted || true
+
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath DerivedData \
+            build 2>&1 | tee build.log | tail -60
+
+      - name: Install, launch and screenshot
+        run: |
+          set -euo pipefail
+          APP=$(find DerivedData/Build/Products -maxdepth 3 -name "HermesMobile.app" -type d | head -1)
+          if [ -z "$APP" ]; then echo "no HermesMobile.app produced"; find DerivedData/Build/Products -maxdepth 2; exit 1; fi
+          echo "built: $APP"
+          # Simulator installs need a signature; ad-hoc is enough and needs no team.
+          codesign --force --deep --sign - "$APP" 2>&1 | tail -5 || true
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" "$BUNDLE_ID" || \
+            xcrun simctl launch "$UDID" "$(defaults read "$(pwd)/$APP/Info" CFBundleIdentifier)"
+          sleep 15
+          xcrun simctl io "$UDID" screenshot shot-1-launch.png
+          sleep 10
+          xcrun simctl io "$UDID" screenshot shot-2-settled.png
+          xcrun simctl spawn "$UDID" log show --last 3m --predicate 'process == "HermesMobile"' --style compact > app-log.txt 2>&1 | tail -5 || true
+          ls -l shot-*.png
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermex-simulator
+          retention-days: 3
+          path: |
+            shot-*.png
+            build.log
+            app-log.txt
