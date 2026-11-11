@@ -7,7 +7,7 @@ import XCTest
 /// These park the socket at `session.resume`, so the handshake never finishes, and hold the
 /// read to its own time: the rows are on screen while the connection is still recovering.
 ///
-/// With `HERMEX_SHOT_DIR` set the same open captures the two frames the contact sheet is
+/// With `HERMEX_SHOT_FOLDER` set the same open captures the two frames the contact sheet is
 /// made from — parked, and connected — and asserts nothing, so the frames can be shot on a
 /// tree without the fix for comparison.
 @MainActor
@@ -33,7 +33,7 @@ final class HermesOpenReadShotsTests: XCTestCase {
     func testTheTranscriptIsUpWhileTheHandshakeIsStillParked() async throws {
         if shotDirectory != nil { throw XCTSkip("the contact-sheet run captures frames instead") }
         let open = try await openChat()
-        try await waitUntil("the transcript to show the settled rows") {
+        await waitUntil("the transcript to show the settled rows", timeout: 30) {
             !open.model.displayedTranscriptMessages.isEmpty
         }
         XCTAssertEqual(open.rows, 4)
@@ -61,11 +61,9 @@ final class HermesOpenReadShotsTests: XCTestCase {
         // The runner is slow and the fix is not instant: give the read a generous window, and
         // record when the rows arrived so the sheet can say how long the open took.
         let started = ContinuousClock().now
-        try await waitUntil("the transcript to show the settled rows", fail: false) {
-            !open.model.displayedTranscriptMessages.isEmpty
-        }
+        _ = await rowsArrived(open.model, within: 30)
         let elapsed = started.duration(to: ContinuousClock().now)
-        try settle(window)
+        await settle(window, passes: 6)
         try capture(window, directory: directory, name: "01-open")
         let parked = Notes(
             rows: open.rows,
@@ -76,8 +74,8 @@ final class HermesOpenReadShotsTests: XCTestCase {
 
         open.host.allow("session.resume")
         await open.opening.value
-        try await waitUntil("the chat to connect") { open.engine.connectionState == .connected }
-        try settle(window)
+        await waitUntil("the chat to connect", timeout: 30) { open.engine.connectionState == .connected }
+        await settle(window, passes: 6)
         try capture(window, directory: directory, name: "02-connected")
         let connected = Notes(
             rows: open.rows, connected: open.engine.connectionState == .connected,
@@ -186,24 +184,6 @@ final class HermesOpenReadShotsTests: XCTestCase {
         return window
     }
 
-    private func settle(_ window: UIWindow, passes: Int = 4) async throws {
-        for _ in 0..<passes {
-            try await turn()
-            window.layoutIfNeeded()
-            _ = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-            }
-        }
-    }
-
-    /// One turn of the main queue: enough for a reply already in flight to land, and no
-    /// wall-clock sleep to wait out a state that has its own signal.
-    private func turn() async throws {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async { continuation.resume() }
-        }
-    }
-
     private func capture(_ window: UIWindow, directory: URL, name: String) throws {
         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
@@ -212,13 +192,21 @@ final class HermesOpenReadShotsTests: XCTestCase {
         try data.write(to: directory.appendingPathComponent("\(name).png"))
     }
 
-    private func waitUntil(_ what: String, turns: Int = 600, fail: Bool = true,
-                           _ condition: @MainActor () -> Bool) async throws {
-        for _ in 0..<turns {
-            if condition() { return }
-            try await turn()
+    /// Waits for the rows on their own signal, and says whether they came: the base tree has
+    /// no fix, so its frames are shot of a chat that never fills, and the run must not fail on
+    /// the way to them. `waitUntil` is the failing version, for the trees that should fill.
+    @MainActor
+    private func rowsArrived(_ model: ChatViewModel, within seconds: TimeInterval) async -> Bool {
+        let deadline = ContinuousClock().now + .seconds(seconds)
+        while ContinuousClock().now < deadline {
+            if !model.displayedTranscriptMessages.isEmpty { return true }
+            let changed = XCTestExpectation(description: "the transcript's rows")
+            withObservationTracking { _ = model.displayedTranscriptMessages } onChange: {
+                changed.fulfill()
+            }
+            _ = await XCTWaiter().fulfillment(of: [changed], timeout: 5)
         }
-        if fail { XCTFail("timed out waiting for \(what)") }
+        return !model.displayedTranscriptMessages.isEmpty
     }
 
     /// The transcript pages the scripted host serves, by offset, and the offsets it was asked for.
