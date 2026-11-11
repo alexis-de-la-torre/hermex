@@ -1,0 +1,128 @@
+name: Hermex contact sheet
+
+# Fork-only workflow: shoot the contact sheet for the HMX-2 fix — one column per moment of
+# a chat open, one row per tree. The frames come from HermesMobileTests/HermesOpenReadShotsTests,
+# which parks the socket at `session.resume` so the handshake never finishes: the "before"
+# tree (the base commit) shows what the open looks like without the fix, the "after" tree
+# (this pull request) shows it with the fix. The runner stitches both runs into one sheet.
+#
+# Nothing here talks to upstream; it needs a Mac only because Xcode does.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sheet:
+    name: Shoot the contact sheet
+    runs-on: xcode-27
+    timeout-minutes: 180
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      PROJECT_PATH: HermesMobile.xcodeproj
+      SCHEME: HermesMobile
+      BUNDLE_ID: com.uzairansar.hermesmobile
+      DEVICE_NAME: iPhone 17
+      SHOT_CLASS: HermesMobileTests/HermesOpenReadShotsTests
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available -j \
+            | jq -r --arg n "$DEVICE_NAME" '.devices | to_entries[] | .value[]
+                     | select(.name == $n) | .udid' | head -1)
+          if [ -z "$UDID" ]; then
+            echo "No $DEVICE_NAME simulator; available devices:"
+            xcrun simctl list devices available | head -40
+            exit 1
+          fi
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: The base tree, with this pull request's test
+        run: |
+          set -euo pipefail
+          BASE_REF="${{ github.base_ref || 'master' }}"
+          BASE=$(git merge-base HEAD "origin/$BASE_REF")
+          echo "base: $BASE ($BASE_REF)"
+          echo "BASE_SHA=$BASE" >> "$GITHUB_ENV"
+          git worktree add "$PWD/tree-before" "$BASE"
+          # The frames are shot by this pull request's test on both trees: the test is the
+          # camera, the tree is what differs.
+          cp "$GITHUB_WORKSPACE/HermesMobileTests/HermesOpenReadShotsTests.swift" \
+             "$PWD/tree-before/HermesMobileTests/"
+
+      - name: Shoot the base tree
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          TEST_RUNNER_HERMEX_SHOT_FOLDER=before \
+          xcodebuild test \
+            -project "$PWD/tree-before/$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath "$PWD/tree-before/DerivedData" \
+            -only-testing:"$SHOT_CLASS" \
+            2>&1 | tee before-test.log | tail -60
+          xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "HermesMobile"' --style compact > before-app-log.txt 2>&1 || true
+          mkdir -p sheet/before
+          CONTAINER=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data || true)
+          echo "container: $CONTAINER"
+          if [ -n "$CONTAINER" ]; then cp -R "$CONTAINER/tmp/before/." sheet/before/ 2>/dev/null || true; fi
+          ls -l sheet/before || true
+
+      - name: Shoot this pull request
+        run: |
+          set -o pipefail
+          TEST_RUNNER_HERMEX_SHOT_FOLDER=after \
+          xcodebuild test \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath DerivedData \
+            -only-testing:"$SHOT_CLASS" \
+            2>&1 | tee after-test.log | tail -80
+          mkdir -p sheet/after
+          CONTAINER=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data || true)
+          echo "container: $CONTAINER"
+          if [ -n "$CONTAINER" ]; then cp -R "$CONTAINER/tmp/after/." sheet/after/ 2>/dev/null || true; fi
+          ls -l sheet/after || true
+
+      - name: Stitch the sheet
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 -m venv .sheet-venv
+          .sheet-venv/bin/pip install --quiet pillow
+          .sheet-venv/bin/python .github/scripts/contact_sheet.py \
+            --before sheet/before --after sheet/after --out contact-sheet.png \
+            --before-label "base ${{ env.BASE_SHA }}" \
+            --after-label "this pull request"
+
+      - name: Upload the contact sheet and the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermex-contact-sheet
+          retention-days: 14
+          path: |
+            contact-sheet.png
+            sheet/**
+            before-test.log
+            after-test.log
+            before-app-log.txt
