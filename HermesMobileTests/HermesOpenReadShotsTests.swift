@@ -233,10 +233,11 @@ final class HermesOpenReadShotsTests: XCTestCase {
         var offsets: [Int] { lock.withLock { asked } }
 
         func answer(_ request: URLRequest) -> HermesHostFixture.Reply? {
-            guard request.url?.path == HermesOpenReadShotsTests.path,
-                  let query = request.url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) })?.queryItems,
-                  let offset = query.first(where: { $0.name == "offset" })?.value.flatMap(Int.init)
-            else { return nil }
+            // The open's read asks for the newest rows without an offset; a page read names one.
+            guard request.url?.path == "/api/sessions/tip/messages" else { return nil }
+            let items = request.url
+                .flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems } ?? []
+            let offset = items.first { $0.name == "offset" }?.value.flatMap(Int.init) ?? 0
             return lock.withLock {
                 asked.append(offset)
                 guard let rows = pages[offset] else { return .json(500, .object(["detail": .string("unavailable")])) }
