@@ -144,7 +144,7 @@ def main() -> int:
 
     runs = [
         ("Before · the open waits for the handshake", args.before_label, pathlib.Path(args.before)),
-        ("After · the transcript is read beside the attach", args.after_label, pathlib.Path(args.after)),
+        ("After · the read is moved beside the attach (no effect)", args.after_label, pathlib.Path(args.after)),
     ]
     moments = [("the open · handshake parked", "open"), ("connected", "connected")]
 
@@ -157,9 +157,12 @@ def main() -> int:
         "parked at session.resume, so the handshake never finishes and the open is the only thing running."
     )
     footnote = (
-        "Before the fix the transcript read is sent by the rebuild, after the handshake: while the socket "
-        "recovers the chat has no rows. After it the read goes out from activate(), beside the attach, so the "
-        "rows are up in the read's time and the rebuild joins that read instead of sending another."
+        "Both trees open on the same screen: 0 rows, and no transcript read until the handshake ends. The "
+        "read cannot go out earlier — every bot request waits on the attach (`BotClient` throws `stale` "
+        "until the socket is signed in), so the read placed beside the attach is answered with nothing and "
+        "the rails stay empty. What the app already has is the way to fill them: `prepareInitialAppearance` "
+        "paints the cached transcript before the attach, and that path is empty here because this run's "
+        "store starts empty."
     )
     subtitle_lines, subtitle_height = block(subtitle, SUBTITLE_SIZE, width - 2 * MARGIN)
     footnote_lines, footnote_height = block(footnote, FOOTNOTE_SIZE, width - 2 * MARGIN)
