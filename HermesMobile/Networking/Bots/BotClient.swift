@@ -130,8 +130,11 @@ import Foundation
         return profile
     }
 
+    /// One page of the transcript. A read is idempotent and the host answers it over HTTP with
+    /// this connection's own sign-in (`HermesConnection.authorized`), so it does not wait for the
+    /// socket: the chat fills while the handshake is still going (HMX-2). Only writes need the
+    /// attach, and they are the ones that keep the check.
     func sessionMessages(_ key: String, profile: String, offset: Int?) async throws -> [BotJSON]? {
-        guard gateway.isAttached(consumerID) else { throw BotFailure.stale }
         let attempt = self.attempt
         let data: Data
         do {
