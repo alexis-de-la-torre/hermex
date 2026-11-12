@@ -66,18 +66,17 @@ final class HermesOpenReadShotsTests: XCTestCase {
         await settle(window, passes: 6)
         try capture(window, directory: directory, name: "01-open")
         let parked = Notes(
-            connected: open.engine.connectionState == .connected,
+            connected: resumed(open.host),
             seconds: Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18,
             reads: open.pages.offsets.count
         )
 
         open.host.allow("session.resume")
-        await open.opening.value
-        await waitUntil("the chat to connect", timeout: 30) { open.engine.connectionState == .connected }
+        await waitUntil("the socket to settle", timeout: 30) { self.resumed(open.host) }
         await settle(window, passes: 6)
         try capture(window, directory: directory, name: "02-connected")
         let connected = Notes(
-            connected: open.engine.connectionState == .connected,
+            connected: resumed(open.host),
             seconds: Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18,
             reads: open.pages.offsets.count
         )
@@ -125,6 +124,7 @@ final class HermesOpenReadShotsTests: XCTestCase {
         host.always("session.events.since", .init(result: BotFixtureWire.replay(latest: 0)))
         host.withhold("session.resume")
         let client = BotClient(http: host.connection(Self.connection))
+        let connection = host.connection(Self.connection)
         let pages = Pages([0: Self.rows])
         _ = HermesHostFixture.configuration { pages.answer($0) }
         let engine = HermesConversation(
@@ -141,12 +141,16 @@ final class HermesOpenReadShotsTests: XCTestCase {
         )
         let opening: Task<Void, Never>
         if let window {
-            // The app's own chat screen, driven by the scripted host: the frames are of what a
-            // reader sees, not a stand-in view drawn for the sheet. `ChatView` builds the model
-            // it shows from the engine, so this one is left alone.
+            // The app's own chat screen, over the scripted host: the frames are of what a reader
+            // sees, not a stand-in view drawn for the sheet. `ChatView` builds the conversation
+            // and the model it shows from this session, and the fake socket host answers it.
             let chat = ChatView(
                 session: session, server: URL(string: "https://hermes.example")!,
-                onAPIError: { _ in }, hermesSession: engine
+                onAPIError: { _ in },
+                hermesSession: HermesSessionChat(
+                    server: URL(string: "https://hermes.example")!, connection: connection,
+                    target: .session(profile: "default", key: "tip")
+                )
             )
             window.rootViewController = UIHostingController(rootView: chat)
             opening = Task {}
@@ -176,6 +180,11 @@ final class HermesOpenReadShotsTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// Whether the chat's handshake got past the park: the host's own record of the frame.
+    private func resumed(_ host: BotSocketHost) -> Bool {
+        host.requests.contains { $0["method"].text == "session.resume" }
     }
 
     /// Waits for the open's read to leave the app, and says whether it did: the base tree has
