@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 import UIKit
 import XCTest
@@ -148,7 +149,7 @@ final class HermesOpenReadShotsTests: XCTestCase {
             )
             // The chat writes its cache through the view's context, so give it the app's own
             // store, in memory: the frames then come from a chat that loads as it does in the app.
-            let store = CacheStore.container(for: ModelConfiguration(isStoredInMemoryOnly: true))
+            let store = CacheContainer.container(for: ModelConfiguration(isStoredInMemoryOnly: true))
             let chatView = chat.environment(\.modelContext, store.mainContext)
             window.rootViewController = UIHostingController(rootView: chatView)
         }

@@ -46,17 +46,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Cache the builds
+      - name: Cache the packages
         uses: actions/cache@v4
         with:
-          path: |
-            DerivedData
-            tree-before/DerivedData
-            ~/Library/Caches/org.swift.swiftpm
-          key: sheet-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}-${{ github.sha }}
-          restore-keys: |
-            sheet-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}-
-            sheet-${{ runner.os }}-
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
 
       - name: Boot simulator
         run: |
