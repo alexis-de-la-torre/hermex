@@ -128,6 +128,10 @@ jobs:
           if [ ! -f sheet/after/01-open.png ]; then
             echo "::error::the pull request's run shot no frames — the test did not run, or it crashed"
             grep -E "Test Case|error:|Executed|TEST FAILED" after-test.log | tail -30 || true
+            # A crash leaves its report in the bundle, not in the test log: take it out here,
+            # where the toolchain is, so the next look does not need a Mac.
+            xcrun xcresulttool export diagnostics --path Result-after.xcresult --output-path diag 2>&1 | tail -3 || true
+            xcrun simctl spawn "$UDID" log show --last 5m --predicate 'process == "HermesMobile"' --style compact > after-app-log.txt 2>&1 || true
             exit 1
           fi
 
@@ -155,4 +159,5 @@ jobs:
             after-test.log
             after-app-log.txt
             Result-after.xcresult
+            diag/**
             before-app-log.txt
