@@ -150,8 +150,7 @@ final class HermesOpenReadShotsTests: XCTestCase {
             // The chat writes its cache through the view's context, so give it the app's own
             // store, in memory: the frames then come from a chat that loads as it does in the app.
             let store = CacheContainer.container(for: ModelConfiguration(isStoredInMemoryOnly: true))
-            let chatView = chat.environment(\.modelContext, store.mainContext)
-            window.rootViewController = UIHostingController(rootView: chatView)
+            window.rootViewController = UIHostingController(rootView: chat.modelContainer(store))
         }
         return Open(model: model, engine: engine, host: host, pages: pages, opening: opening)
     }
