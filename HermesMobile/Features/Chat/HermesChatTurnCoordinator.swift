@@ -282,6 +282,9 @@ struct HermesLostTurn: Equatable {
     /// first accepted prompt.
     private let opensNew: Bool
     @ObservationIgnored private var attaching: Task<Void, Never>?
+    /// The newest rows `activate()` sends beside the attach, so a chat opens on its history
+    /// instead of waiting for the handshake that rebuilds on it (#HMX-2).
+    @ObservationIgnored private var openRead: Task<Void, Never>?
     @ObservationIgnored private var attachGeneration = 0
     /// The host refused the saved password (`.rejected(401)`, #884, #942): nothing on this chat
     /// attaches again, so the refused password is never sent again unasked. The chat offers
@@ -438,11 +441,45 @@ struct HermesLostTurn: Equatable {
     /// Attaches the session, creating a new one on the first attach, or joins the attach
     /// already running so a new session is never created twice.
     func activate() async {
+        // Sent before the join below: an attach already in flight still wants the rows, and
+        // the read is the chat's own, not the attach's.
+        readNewestRowsAtOpen()
         if let attaching { await attaching.value; return }
         // Connected, attaching, or retrying on its own backoff: nothing to start. A failure
         // the engine will not retry is attached again here.
         guard !engine.isActive || (engine.connectionState == .disconnected && !engine.isReconnecting) else { return }
         await startAttach().value
+    }
+
+    /// The newest rows a chat open reads, sent beside the attach. The rebuild that follows a
+    /// lost replay joins it (`conversationDidReadSnapshot`) rather than reading again, and an
+    /// attach that never gets that far leaves the history to it: the rows are the same either
+    /// way, and the chat is already showing them.
+    private func readNewestRowsAtOpen() {
+        guard openRead == nil else { return }
+        guard case .session(let profile, let key) = engine.target,
+              history.newestCoverage == nil, !needsSignIn else {
+            print("HMX-2 open read: not sent — target=\(engine.target) coverage=\(history.newestCoverage != nil) signIn=\(needsSignIn)")
+            return
+        }
+        print("HMX-2 open read: sending for \(key) under \(profile)")
+        let wire = engine.wire
+        let target = engine.target
+        openRead = Task { [weak self] in
+            let rows: [BotJSON]?
+            do {
+                rows = try await wire.sessionMessages(key, profile: profile, offset: nil)
+                print("HMX-2 open read: \(rows?.count ?? -1) rows back")
+            } catch {
+                rows = nil
+                print("HMX-2 open read: \(error)")
+            }
+            guard let self, let rows, !Task.isCancelled, engine.target == target,
+                  history.newestCoverage == nil else { return }
+            history.mergeNewest(rows, reachedStart: rows.count < HermesREST.transcriptPageSize)
+            historyTurns = turnsStarted
+            delegate?.hermesReplaceTranscript(historyTranscript())
+        }
     }
 
     /// The one attach in flight. Cancelled by leaving, so one that has not begun never does.
@@ -2166,7 +2203,14 @@ extension HermesChatTurnCoordinator: HermesConversationOwner {
         if engine.replayWasReset || needsRebuild {
             // A pending compaction may have finished among the frames lost.
             if compactionPending { history = HermesTranscriptHistory() }
-            await readNewestRows(attempt: attempt)
+            // The open sent this read beside the attach: join it rather than reading again.
+            if let openRead {
+                await openRead.value
+                self.openRead = nil
+            }
+            // A read that failed, or a host that answered with no rows, leaves the rebuild
+            // its own read: only one that landed can stand in for it.
+            if history.newestCoverage == nil { await readNewestRows(attempt: attempt) }
         }
         try engine.check(attempt)
         reconcile(with: snapshot)

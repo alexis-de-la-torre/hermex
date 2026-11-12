@@ -1,0 +1,163 @@
+name: Hermex contact sheet
+
+# Fork-only workflow: shoot the contact sheet for the HMX-2 fix — one column per moment of
+# a chat open, one row per tree. The frames come from HermesMobileTests/HermesOpenReadShotsTests,
+# which parks the socket at `session.resume` so the handshake never finishes: the "before"
+# tree (the base commit) shows what the open looks like without the fix, the "after" tree
+# (this pull request) shows it with the fix. The runner stitches both runs into one sheet.
+#
+# Nothing here talks to upstream; it needs a Mac only because Xcode does.
+
+on:
+  pull_request:
+  workflow_dispatch:
+    # Iterating on the frames themselves: `only: after` shoots this tree alone and skips the
+    # stitch, so a change to the shot lands in ~a build instead of a build of both trees.
+    inputs:
+      only:
+        description: Which trees to shoot
+        type: choice
+        options: [both, after]
+        default: after
+      shot_wait:
+        description: Seconds a frame waits for the open's read
+        default: "8"
+
+permissions:
+  contents: read
+
+jobs:
+  sheet:
+    name: Shoot the contact sheet
+    runs-on: xcode-27
+    timeout-minutes: 180
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      PROJECT_PATH: HermesMobile.xcodeproj
+      SCHEME: HermesMobile
+      BUNDLE_ID: com.uzairansar.hermesmobile
+      DEVICE_NAME: iPhone 17
+      SHOT_CLASS: HermesMobileTests/HermesOpenReadShotsTests
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache the packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available -j \
+            | jq -r --arg n "$DEVICE_NAME" '.devices | to_entries[] | .value[]
+                     | select(.name == $n) | .udid' | head -1)
+          if [ -z "$UDID" ]; then
+            echo "No $DEVICE_NAME simulator; available devices:"
+            xcrun simctl list devices available | head -40
+            exit 1
+          fi
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: The base tree, with this pull request's test
+        if: github.event_name == 'pull_request' || inputs.only == 'both'
+        run: |
+          set -euo pipefail
+          BASE_REF="${{ github.base_ref || 'master' }}"
+          BASE=$(git merge-base HEAD "origin/$BASE_REF")
+          echo "base: $BASE ($BASE_REF)"
+          echo "BASE_SHA=$BASE" >> "$GITHUB_ENV"
+          git worktree add "$PWD/tree-before" "$BASE"
+          # The frames are shot by this pull request's test on both trees: the test is the
+          # camera, the tree is what differs.
+          cp "$GITHUB_WORKSPACE/HermesMobileTests/HermesOpenReadShotsTests.swift" \
+             "$PWD/tree-before/HermesMobileTests/"
+          # The test target lists its sources one by one, so the test arrives with its entry.
+          cp "$GITHUB_WORKSPACE/$PROJECT_PATH/project.pbxproj" \
+             "$PWD/tree-before/$PROJECT_PATH/project.pbxproj"
+
+      - name: Shoot the base tree
+        if: github.event_name == 'pull_request' || inputs.only == 'both'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          TEST_RUNNER_HERMEX_SHOT_FOLDER=before TEST_RUNNER_HERMEX_SHOT_WAIT="${{ inputs.shot_wait || '30' }}" \
+          xcodebuild test \
+            -project "$PWD/tree-before/$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath "$PWD/tree-before/DerivedData" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$PWD/Result-before.xcresult" \
+            -only-testing:"$SHOT_CLASS" \
+            2>&1 | tee before-test.log | tail -60
+          xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "HermesMobile"' --style compact > before-app-log.txt 2>&1 || true
+          .github/scripts/shot_frames.sh Result-before.xcresult sheet/before before
+
+      - name: Shoot this pull request
+        run: |
+          set +e
+          TEST_RUNNER_HERMEX_SHOT_FOLDER=after TEST_RUNNER_HERMEX_SHOT_WAIT="${{ inputs.shot_wait || '30' }}" \
+          xcodebuild test \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath DerivedData \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$PWD/Result-after.xcresult" \
+            -only-testing:"$SHOT_CLASS" \
+            2>&1 | tee after-test.log | tail -80
+          # The frames are read out whatever the suite's verdict: a sheet is worth having even
+          # when another test in the class is red, and a crash has to leave its bundle behind.
+          .github/scripts/shot_frames.sh Result-after.xcresult sheet/after after
+          echo "--- what the open read did ---"
+          grep -a "HMX-2 open read" after-test.log | tail -6 || echo "(nothing: the read was never reached)"
+          if [ ! -f sheet/after/01-open.png ]; then
+            echo "::error::the pull request's run shot no frames — the test did not run, or it crashed"
+            grep -E "Test Case|error:|Executed|TEST FAILED" after-test.log | tail -30 || true
+            # A crash leaves its report in the bundle, not in the test log: take it out here,
+            # where the toolchain is, so the next look does not need a Mac.
+            xcrun xcresulttool export diagnostics --path Result-after.xcresult --output-path diag 2>&1 | tail -3 || true
+            xcrun simctl spawn "$UDID" log show --last 5m --predicate 'process == "HermesMobile"' --style compact > after-app-log.txt 2>&1 || true
+            exit 1
+          fi
+
+      - name: Stitch the sheet
+        if: always() && (github.event_name == 'pull_request' || inputs.only == 'both')
+        run: |
+          set -euo pipefail
+          python3 -m venv .sheet-venv
+          .sheet-venv/bin/pip install --quiet pillow
+          .sheet-venv/bin/python .github/scripts/contact_sheet.py \
+            --before sheet/before --after sheet/after --out contact-sheet.png \
+            --before-label "base ${{ env.BASE_SHA }}" \
+            --after-label "this pull request"
+
+      - name: Upload the contact sheet and the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermex-contact-sheet
+          retention-days: 14
+          path: |
+            contact-sheet.png
+            sheet/**
+            before-test.log
+            after-test.log
+            after-app-log.txt
+            Result-after.xcresult
+            diag/**
+            before-app-log.txt

@@ -130,18 +130,24 @@ import Foundation
         return profile
     }
 
+    /// One page of the transcript. A read is idempotent and the host answers it over HTTP with
+    /// this connection's own sign-in (`HermesConnection.authorized`), so it does not wait for the
+    /// socket: the chat fills while the handshake is still going (HMX-2). Only writes need the
+    /// attach, and only a request written on an attached socket is tied to `attempt` — the attach
+    /// bumps it, so an open's read, sent as the attach starts, would be stale before it answered.
     func sessionMessages(_ key: String, profile: String, offset: Int?) async throws -> [BotJSON]? {
-        guard gateway.isAttached(consumerID) else { throw BotFailure.stale }
         let attempt = self.attempt
+        let attached = gateway.isAttached(consumerID)
+        let validate: (() throws -> Void)?
+        if attached { validate = { try self.checkOwner(attempt) } } else { validate = nil }
         let data: Data
         do {
             data = try await http.data(.sessionMessages(key: key, profile: profile, offset: offset),
-                                       validateDispatch: { try self.checkOwner(attempt) })
+                                       validateDispatch: validate)
         } catch BotFailure.rejected(404) {
-            try checkOwner(attempt)
             return nil
         }
-        try checkOwner(attempt)
+        if attached { try checkOwner(attempt) }
         guard let messages = (try? JSONDecoder().decode(BotJSON.self, from: data))?["messages"].list else {
             throw BotFailure.unsupported
         }
