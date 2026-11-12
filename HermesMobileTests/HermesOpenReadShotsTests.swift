@@ -205,6 +205,23 @@ final class HermesOpenReadShotsTests: XCTestCase {
         var offsets: [Int] { lock.withLock { asked } }
 
         func answer(_ request: URLRequest) -> HermesHostFixture.Reply? {
+            // The chat's own sign-in, over HTTP: the read that goes out before the socket needs
+            // it, and the host answers it the same way the real one does.
+            switch request.url?.path {
+            case "/api/status":
+                return .json(200, .object([
+                    "auth_required": .bool(true), "auth_providers": .array([.string("basic")]),
+                    "version": .string("0.23.1")
+                ]))
+            case "/auth/password-login":
+                return .json(200, .object(["ok": .bool(true)]))
+            case "/api/auth/me":
+                return .json(200, .object(["provider": .string("basic"), "future": .array([])]))
+            case "/api/auth/ws-ticket":
+                return .json(200, .object(["ticket": .string("ticket-1")]))
+            default:
+                break
+            }
             // The open's read asks for the newest rows without an offset; a page read names one.
             guard request.url?.path == "/api/sessions/tip/messages" else { return nil }
             let items = request.url
