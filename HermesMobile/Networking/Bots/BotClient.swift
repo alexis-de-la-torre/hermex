@@ -138,10 +138,12 @@ import Foundation
     func sessionMessages(_ key: String, profile: String, offset: Int?) async throws -> [BotJSON]? {
         let attempt = self.attempt
         let attached = gateway.isAttached(consumerID)
+        let validate: (() throws -> Void)?
+        if attached { validate = { try self.checkOwner(attempt) } } else { validate = nil }
         let data: Data
         do {
             data = try await http.data(.sessionMessages(key: key, profile: profile, offset: offset),
-                                       validateDispatch: attached ? { try self.checkOwner(attempt) } : nil)
+                                       validateDispatch: validate)
         } catch BotFailure.rejected(404) {
             return nil
         }
