@@ -83,8 +83,14 @@ final class HermesOpenReadShotsTests: XCTestCase {
             offsets: open.pages.offsets
         )
 
-        try JSONEncoder().encode(["open": parked, "connected": connected])
-            .write(to: directory.appendingPathComponent("notes.json"))
+        let notes = try JSONEncoder().encode(["open": parked, "connected": connected])
+        try notes.write(to: directory.appendingPathComponent("notes.json"))
+        // The sheet's captions are these numbers, and the container a test writes to belongs to
+        // a device clone that is thrown away, so the notes ride in the result bundle too.
+        let notesAttachment = XCTAttachment(data: notes, uniformTypeIdentifier: "public.json")
+        notesAttachment.name = "notes"
+        notesAttachment.lifetime = .keepAlways
+        add(notesAttachment)
     }
 
     /// What one frame's run saw; the sheet prints it under the frame.
@@ -191,6 +197,12 @@ final class HermesOpenReadShotsTests: XCTestCase {
         }
         let data = try XCTUnwrap(image.pngData())
         try data.write(to: directory.appendingPathComponent("\(name).png"))
+        // A test run clones the destination device, and the clone's container goes with it, so
+        // the frame also rides in the result bundle, where the runner can always reach it.
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     /// Waits for the rows on their own signal, and says whether they came: the base tree has

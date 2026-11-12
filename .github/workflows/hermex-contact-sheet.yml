@@ -78,14 +78,12 @@ jobs:
             -sdk iphonesimulator \
             -destination "id=$UDID" \
             -derivedDataPath "$PWD/tree-before/DerivedData" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$PWD/Result-before.xcresult" \
             -only-testing:"$SHOT_CLASS" \
             2>&1 | tee before-test.log | tail -60
           xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "HermesMobile"' --style compact > before-app-log.txt 2>&1 || true
-          mkdir -p sheet/before
-          CONTAINER=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data || true)
-          echo "container: $CONTAINER"
-          if [ -n "$CONTAINER" ]; then cp -R "$CONTAINER/tmp/before/." sheet/before/ 2>/dev/null || true; fi
-          ls -l sheet/before || true
+          .github/scripts/shot_frames.sh Result-before.xcresult sheet/before before
 
       - name: Shoot this pull request
         run: |
@@ -98,13 +96,11 @@ jobs:
             -sdk iphonesimulator \
             -destination "id=$UDID" \
             -derivedDataPath DerivedData \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$PWD/Result-after.xcresult" \
             -only-testing:"$SHOT_CLASS" \
             2>&1 | tee after-test.log | tail -80
-          mkdir -p sheet/after
-          CONTAINER=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data || true)
-          echo "container: $CONTAINER"
-          if [ -n "$CONTAINER" ]; then cp -R "$CONTAINER/tmp/after/." sheet/after/ 2>/dev/null || true; fi
-          ls -l sheet/after || true
+          .github/scripts/shot_frames.sh Result-after.xcresult sheet/after after
           if [ ! -f sheet/after/01-open.png ]; then
             echo "::error::the pull request's run shot no frames — the test did not run, or it crashed"
             grep -E "Test Case|error:|Executed|TEST FAILED" after-test.log | tail -30 || true
