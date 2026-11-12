@@ -441,14 +441,13 @@ struct HermesLostTurn: Equatable {
     /// Attaches the session, creating a new one on the first attach, or joins the attach
     /// already running so a new session is never created twice.
     func activate() async {
+        // Sent before the join below: an attach already in flight still wants the rows, and
+        // the read is the chat's own, not the attach's.
+        readNewestRowsAtOpen()
         if let attaching { await attaching.value; return }
         // Connected, attaching, or retrying on its own backoff: nothing to start. A failure
         // the engine will not retry is attached again here.
         guard !engine.isActive || (engine.connectionState == .disconnected && !engine.isReconnecting) else { return }
-        // The transcript is a read of its own, so it goes out beside the attach rather than
-        // after the handshake: the chat opens on its rows in the read's time, not the
-        // handshake's (#HMX-2). The rebuild joins this read instead of sending another.
-        readNewestRowsAtOpen()
         await startAttach().value
     }
 
@@ -457,12 +456,18 @@ struct HermesLostTurn: Equatable {
     /// attach that never gets that far leaves the history to it: the rows are the same either
     /// way, and the chat is already showing them.
     private func readNewestRowsAtOpen() {
+        guard openRead == nil else { return }
         guard case .session(let profile, let key) = engine.target,
-              history.newestCoverage == nil, !needsSignIn else { return }
+              history.newestCoverage == nil, !needsSignIn else {
+            print("HMX-2 open read: not sent — target=\(engine.target) coverage=\(history.newestCoverage != nil) signIn=\(needsSignIn)")
+            return
+        }
+        print("HMX-2 open read: sending for \(key) under \(profile)")
         let wire = engine.wire
         let target = engine.target
         openRead = Task { [weak self] in
             let rows = try? await wire.sessionMessages(key, profile: profile, offset: nil)
+            print("HMX-2 open read: \(rows?.count ?? -1) rows back")
             guard let self, let rows, !Task.isCancelled, engine.target == target,
                   history.newestCoverage == nil else { return }
             history.mergeNewest(rows, reachedStart: rows.count < HermesREST.transcriptPageSize)

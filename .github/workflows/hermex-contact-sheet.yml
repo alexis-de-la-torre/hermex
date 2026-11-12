@@ -101,6 +101,8 @@ jobs:
             -only-testing:"$SHOT_CLASS" \
             2>&1 | tee after-test.log | tail -80
           .github/scripts/shot_frames.sh Result-after.xcresult sheet/after after
+          echo "--- what the open read did ---"
+          grep -a "HMX-2 open read" after-test.log | tail -6 || echo "(nothing: the read was never reached)"
           if [ ! -f sheet/after/01-open.png ]; then
             echo "::error::the pull request's run shot no frames — the test did not run, or it crashed"
             grep -E "Test Case|error:|Executed|TEST FAILED" after-test.log | tail -30 || true
