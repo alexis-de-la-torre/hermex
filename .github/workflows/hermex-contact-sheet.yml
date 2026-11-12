@@ -11,6 +11,17 @@ name: Hermex contact sheet
 on:
   pull_request:
   workflow_dispatch:
+    # Iterating on the frames themselves: `only: after` shoots this tree alone and skips the
+    # stitch, so a change to the shot lands in ~a build instead of a build of both trees.
+    inputs:
+      only:
+        description: Which trees to shoot
+        type: choice
+        options: [both, after]
+        default: after
+      shot_wait:
+        description: Seconds a frame waits for the open's read
+        default: "8"
 
 permissions:
   contents: read
@@ -35,6 +46,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cache the builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            DerivedData
+            tree-before/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: sheet-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            sheet-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}-
+            sheet-${{ runner.os }}-
+
       - name: Boot simulator
         run: |
           set -euo pipefail
@@ -51,6 +74,7 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
 
       - name: The base tree, with this pull request's test
+        if: github.event_name == 'pull_request' || inputs.only == 'both'
         run: |
           set -euo pipefail
           BASE_REF="${{ github.base_ref || 'master' }}"
@@ -67,10 +91,11 @@ jobs:
              "$PWD/tree-before/$PROJECT_PATH/project.pbxproj"
 
       - name: Shoot the base tree
+        if: github.event_name == 'pull_request' || inputs.only == 'both'
         continue-on-error: true
         run: |
           set -o pipefail
-          TEST_RUNNER_HERMEX_SHOT_FOLDER=before \
+          TEST_RUNNER_HERMEX_SHOT_FOLDER=before TEST_RUNNER_HERMEX_SHOT_WAIT="${{ inputs.shot_wait || '30' }}" \
           xcodebuild test \
             -project "$PWD/tree-before/$PROJECT_PATH" \
             -scheme "$SCHEME" \
@@ -88,7 +113,7 @@ jobs:
       - name: Shoot this pull request
         run: |
           set -o pipefail
-          TEST_RUNNER_HERMEX_SHOT_FOLDER=after \
+          TEST_RUNNER_HERMEX_SHOT_FOLDER=after TEST_RUNNER_HERMEX_SHOT_WAIT="${{ inputs.shot_wait || '30' }}" \
           xcodebuild test \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
@@ -110,7 +135,7 @@ jobs:
           fi
 
       - name: Stitch the sheet
-        if: always()
+        if: always() && (github.event_name == 'pull_request' || inputs.only == 'both')
         run: |
           set -euo pipefail
           python3 -m venv .sheet-venv

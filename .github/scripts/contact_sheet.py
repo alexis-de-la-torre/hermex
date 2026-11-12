@@ -120,17 +120,16 @@ def caption_for(notes: dict, moment: str) -> str:
     if not notes:
         return "no notes.json from this run"
     entry = notes.get("open" if moment == "open" else "connected") or {}
-    rows = entry.get("rows", 0)
     seconds = entry.get("seconds", 0.0)
     connected = entry.get("connected", False)
-    reads = len(entry.get("offsets", []))
+    reads = entry.get("reads", len(entry.get("offsets", [])))
     reads_label = "read" if reads == 1 else "reads"
     if moment == "open":
-        if not rows:
-            return f"0 rows · socket still recovering · nothing to show until the handshake ends · {reads} transcript {reads_label}"
-        return f"{rows} rows at t+{seconds:.2f}s · socket still recovering · {reads} transcript {reads_label}"
+        if not reads:
+            return f"socket still recovering · nothing read yet · {reads} transcript {reads_label} by t+{seconds:.2f}s"
+        return f"transcript read at t+{seconds:.2f}s · socket still recovering · {reads} transcript {reads_label}"
     state = "socket connected" if connected else "socket still recovering"
-    return f"{rows} rows · {state} · {reads} transcript {reads_label}"
+    return f"{state} · {reads} transcript {reads_label} sent"
 
 
 def main() -> int:

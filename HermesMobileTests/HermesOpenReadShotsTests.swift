@@ -58,18 +58,17 @@ final class HermesOpenReadShotsTests: XCTestCase {
 
         let window = try shotWindow()
         let open = try await openChat(window: window)
-        // The runner is slow and the fix is not instant: give the read a generous window, and
-        // record when the rows arrived so the sheet can say how long the open took.
+        // The read is the app's own, so the run can only say when it went out; the frame says
+        // the rest. The base tree has no fix, so its wait runs out — that is the "before".
         let started = ContinuousClock().now
-        _ = await rowsArrived(open.model, within: 30)
+        _ = await readsWentOut(open, within: shotWait)
         let elapsed = started.duration(to: ContinuousClock().now)
         await settle(window, passes: 6)
         try capture(window, directory: directory, name: "01-open")
         let parked = Notes(
-            rows: open.rows,
             connected: open.engine.connectionState == .connected,
             seconds: Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18,
-            offsets: open.pages.offsets
+            reads: open.pages.offsets.count
         )
 
         open.host.allow("session.resume")
@@ -78,9 +77,9 @@ final class HermesOpenReadShotsTests: XCTestCase {
         await settle(window, passes: 6)
         try capture(window, directory: directory, name: "02-connected")
         let connected = Notes(
-            rows: open.rows, connected: open.engine.connectionState == .connected,
+            connected: open.engine.connectionState == .connected,
             seconds: Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18,
-            offsets: open.pages.offsets
+            reads: open.pages.offsets.count
         )
 
         let notes = try JSONEncoder().encode(["open": parked, "connected": connected])
@@ -95,10 +94,15 @@ final class HermesOpenReadShotsTests: XCTestCase {
 
     /// What one frame's run saw; the sheet prints it under the frame.
     private struct Notes: Codable {
-        let rows: Int
         let connected: Bool
         let seconds: Double
-        let offsets: [Int]
+        let reads: Int
+    }
+
+    /// How long a frame waits for the open's read to go out. A short window is for iterating
+    /// on the frames themselves; the sheet's own runs take the full one.
+    private var shotWait: TimeInterval {
+        ProcessInfo.processInfo.environment["HERMEX_SHOT_WAIT"].flatMap(Double.init) ?? 30
     }
 
     // MARK: The chat
@@ -128,59 +132,28 @@ final class HermesOpenReadShotsTests: XCTestCase {
             target: .session(profile: "default", key: "tip"), wire: client
         )
         let turn = HermesChatTurnCoordinator(engine: engine, isNetworkAvailable: { true })
+        let session = SessionSummary(profile: "default")
         let model = ChatViewModel(
-            session: SessionSummary(profile: "default"), server: URL(string: "https://hermes.example")!,
+            session: session, server: URL(string: "https://hermes.example")!,
             streamingScrollCoalescingDelayNanoseconds: 0,
             draftStore: ChatDraftStore(persistence: BotMemoryDrafts(), debounceDuration: .seconds(60)),
             backend: .hermes(turn)
         )
-        if let window { window.rootViewController = UIHostingController(rootView: ShotView(model: model)) }
-        let opening = Task { await model.loadMessages() }
-        return Open(model: model, engine: engine, host: host, pages: pages, opening: opening)
-    }
-
-    /// The chat's own rows, drawn by the app's own bubble.
-    private struct ShotView: View {
-        let model: ChatViewModel
-
-        var body: some View {
-            let rows = model.displayedTranscriptMessages
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(rows.isEmpty ? "Opening the chat" : "The chat is open")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(rows.isEmpty
-                         ? "transcript: empty · waiting for the handshake"
-                         : "transcript: \(rows.count) rows · socket still recovering")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color(uiColor: .secondarySystemBackground))
-                Divider()
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(rows) { row in
-                            MessageBubbleView(
-                                message: row.message, transcriptMediaCacheNamespace: "contact-sheet",
-                                textOnly: true
-                            )
-                        }
-                    }
-                    .padding(12)
-                }
-                Spacer(minLength: 0)
-                Divider()
-                Text("Hermex · iPhone 17 · HermesMobileTests")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-            }
-            .frame(width: 393, height: 500)
-            .background(Color(uiColor: .systemBackground))
+        let opening: Task<Void, Never>
+        if let window {
+            // The app's own chat screen, driven by the scripted host: the frames are of what a
+            // reader sees, not a stand-in view drawn for the sheet. `ChatView` builds the model
+            // it shows from the engine, so this one is left alone.
+            let chat = ChatView(
+                session: session, server: URL(string: "https://hermes.example")!,
+                onAPIError: { _ in }, hermesSession: engine
+            )
+            window.rootViewController = UIHostingController(rootView: chat)
+            opening = Task {}
+        } else {
+            opening = Task { await model.loadMessages() }
         }
+        return Open(model: model, engine: engine, host: host, pages: pages, opening: opening)
     }
 
     private func shotWindow() throws -> UIWindow {
@@ -205,21 +178,20 @@ final class HermesOpenReadShotsTests: XCTestCase {
         add(attachment)
     }
 
-    /// Waits for the rows on their own signal, and says whether they came: the base tree has
+    /// Waits for the open's read to leave the app, and says whether it did: the base tree has
     /// no fix, so its frames are shot of a chat that never fills, and the run must not fail on
     /// the way to them. `waitUntil` is the failing version, for the trees that should fill.
     @MainActor
-    private func rowsArrived(_ model: ChatViewModel, within seconds: TimeInterval) async -> Bool {
+    private func readsWentOut(_ open: Open, within seconds: TimeInterval) async -> Bool {
         let deadline = ContinuousClock().now + .seconds(seconds)
         while ContinuousClock().now < deadline {
-            if !model.displayedTranscriptMessages.isEmpty { return true }
-            let changed = XCTestExpectation(description: "the transcript's rows")
-            withObservationTracking { _ = model.displayedTranscriptMessages } onChange: {
-                changed.fulfill()
-            }
-            _ = await XCTWaiter().fulfillment(of: [changed], timeout: 5)
+            if !open.pages.offsets.isEmpty { return true }
+            let changed = XCTestExpectation(description: "the open's read")
+            let pages = open.pages
+            withObservationTracking { _ = pages.offsets } onChange: { changed.fulfill() }
+            _ = await XCTWaiter().fulfillment(of: [changed], timeout: 2)
         }
-        return !model.displayedTranscriptMessages.isEmpty
+        return !open.pages.offsets.isEmpty
     }
 
     /// The transcript pages the scripted host serves, by offset, and the offsets it was asked for.
