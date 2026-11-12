@@ -128,59 +128,31 @@ final class HermesOpenReadShotsTests: XCTestCase {
             target: .session(profile: "default", key: "tip"), wire: client
         )
         let turn = HermesChatTurnCoordinator(engine: engine, isNetworkAvailable: { true })
+        let session = SessionSummary(profile: "default")
         let model = ChatViewModel(
-            session: SessionSummary(profile: "default"), server: URL(string: "https://hermes.example")!,
+            session: session, server: URL(string: "https://hermes.example")!,
             streamingScrollCoalescingDelayNanoseconds: 0,
             draftStore: ChatDraftStore(persistence: BotMemoryDrafts(), debounceDuration: .seconds(60)),
             backend: .hermes(turn)
         )
-        if let window { window.rootViewController = UIHostingController(rootView: ShotView(model: model)) }
         let opening = Task { await model.loadMessages() }
-        return Open(model: model, engine: engine, host: host, pages: pages, opening: opening)
-    }
-
-    /// The chat's own rows, drawn by the app's own bubble.
-    private struct ShotView: View {
-        let model: ChatViewModel
-
-        var body: some View {
-            let rows = model.displayedTranscriptMessages
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(rows.isEmpty ? "Opening the chat" : "The chat is open")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(rows.isEmpty
-                         ? "transcript: empty · waiting for the handshake"
-                         : "transcript: \(rows.count) rows · socket still recovering")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color(uiColor: .secondarySystemBackground))
-                Divider()
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(rows) { row in
-                            MessageBubbleView(
-                                message: row.message, transcriptMediaCacheNamespace: "contact-sheet",
-                                textOnly: true
-                            )
-                        }
-                    }
-                    .padding(12)
-                }
-                Spacer(minLength: 0)
-                Divider()
-                Text("Hermex · iPhone 17 · HermesMobileTests")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-            }
-            .frame(width: 393, height: 500)
-            .background(Color(uiColor: .systemBackground))
+        if let window {
+            // The app's own chat screen, showing the chat this test drives over the scripted
+            // host: `continuity` is how a `ChatView` adopts a model instead of building one, so
+            // the frames are of what a reader sees rather than a stand-in drawn for the sheet.
+            let continuity = ChatContinuity()
+            continuity.viewAppeared(UUID(), model: model, returnsWaitingSend: { _, _ in })
+            let chat = ChatView(
+                session: session, server: URL(string: "https://hermes.example")!,
+                onAPIError: { _ in }, continuity: continuity
+            )
+            // The chat writes its cache through the view's context, so give it the app's own
+            // store, in memory: the frames then come from a chat that loads as it does in the app.
+            let store = CacheStore.container(for: ModelConfiguration(isStoredInMemoryOnly: true))
+            let chatView = chat.environment(\.modelContext, store.mainContext)
+            window.rootViewController = UIHostingController(rootView: chatView)
         }
+        return Open(model: model, engine: engine, host: host, pages: pages, opening: opening)
     }
 
     private func shotWindow() throws -> UIWindow {
