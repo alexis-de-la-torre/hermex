@@ -133,35 +133,19 @@ import Foundation
     /// One page of the transcript. A read is idempotent and the host answers it over HTTP with
     /// this connection's own sign-in (`HermesConnection.authorized`), so it does not wait for the
     /// socket: the chat fills while the handshake is still going (HMX-2). Only writes need the
-    /// attach, and they are the ones that keep the check.
+    /// attach, and only a request written on an attached socket is tied to `attempt` — the attach
+    /// bumps it, so an open's read, sent as the attach starts, would be stale before it answered.
     func sessionMessages(_ key: String, profile: String, offset: Int?) async throws -> [BotJSON]? {
         let attempt = self.attempt
+        let attached = gateway.isAttached(consumerID)
         let data: Data
         do {
             data = try await http.data(.sessionMessages(key: key, profile: profile, offset: offset),
-                                       validateDispatch: { try self.checkOwner(attempt) })
-        } catch BotFailure.rejected(404) {
-            try checkOwner(attempt)
-            return nil
-        }
-        try checkOwner(attempt)
-        guard let messages = (try? JSONDecoder().decode(BotJSON.self, from: data))?["messages"].list else {
-            throw BotFailure.unsupported
-        }
-        return messages
-    }
-
-    /// The newest page, for a chat's open. It goes out before the socket's generation is fixed
-    /// (the attach that follows bumps it), so it is not tied to `attempt`: a read that outlives a
-    /// reconnect is still a valid read, and the reply is merged only if the open is still the
-    /// open. Writes keep `attempt`; this one does not need it.
-    func newestMessages(_ key: String, profile: String) async throws -> [BotJSON]? {
-        let data: Data
-        do {
-            data = try await http.data(.sessionMessages(key: key, profile: profile, offset: nil))
+                                       validateDispatch: attached ? { try self.checkOwner(attempt) } : nil)
         } catch BotFailure.rejected(404) {
             return nil
         }
+        if attached { try checkOwner(attempt) }
         guard let messages = (try? JSONDecoder().decode(BotJSON.self, from: data))?["messages"].list else {
             throw BotFailure.unsupported
         }

@@ -468,7 +468,7 @@ struct HermesLostTurn: Equatable {
         openRead = Task { [weak self] in
             let rows: [BotJSON]?
             do {
-                rows = try await wire.newestMessages(key, profile: profile)
+                rows = try await wire.sessionMessages(key, profile: profile, offset: nil)
                 print("HMX-2 open read: \(rows?.count ?? -1) rows back")
             } catch {
                 rows = nil
