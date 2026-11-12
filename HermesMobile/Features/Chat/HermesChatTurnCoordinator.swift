@@ -284,7 +284,7 @@ struct HermesLostTurn: Equatable {
     @ObservationIgnored private var attaching: Task<Void, Never>?
     /// The newest rows `activate()` sends beside the attach, so a chat opens on its history
     /// instead of waiting for the handshake that rebuilds on it (#HMX-2).
-    @ObservationIgnored private var openRead: Task<HermesChatTranscript?, Never>?
+    @ObservationIgnored private var openRead: Task<Void, Never>?
     @ObservationIgnored private var attachGeneration = 0
     /// The host refused the saved password (`.rejected(401)`, #884, #942): nothing on this chat
     /// attaches again, so the refused password is never sent again unasked. The chat offers
@@ -445,32 +445,30 @@ struct HermesLostTurn: Equatable {
         // Connected, attaching, or retrying on its own backoff: nothing to start. A failure
         // the engine will not retry is attached again here.
         guard !engine.isActive || (engine.connectionState == .disconnected && !engine.isReconnecting) else { return }
+        // The transcript is a read of its own, so it goes out beside the attach rather than
+        // after the handshake: the chat opens on its rows in the read's time, not the
+        // handshake's (#HMX-2). The rebuild joins this read instead of sending another.
+        readNewestRowsAtOpen()
         await startAttach().value
     }
 
-    /// The newest rows a chat open reads, sent beside the attach rather than after the
-    /// handshake: the chat opens on its rows in the read's time (#HMX-2). The rebuild that
-    /// follows a lost replay joins this read instead of sending another, and an attach that
-    /// never gets that far leaves the history to it: the rows are the same either way.
-    ///
-    /// The chat asks for this before it attaches and publishes what comes back itself, since
-    /// the delegate that carries a rebuild's transcript is not wired until the first snapshot.
-    func readNewestRowsForOpen() async -> HermesChatTranscript? {
+    /// The newest rows a chat open reads, sent beside the attach. The rebuild that follows a
+    /// lost replay joins it (`conversationDidReadSnapshot`) rather than reading again, and an
+    /// attach that never gets that far leaves the history to it: the rows are the same either
+    /// way, and the chat is already showing them.
+    private func readNewestRowsAtOpen() {
         guard case .session(let profile, let key) = engine.target,
-              history.newestCoverage == nil, !needsSignIn else { return nil }
-        if let openRead { return await openRead.value }
+              history.newestCoverage == nil, !needsSignIn else { return }
         let wire = engine.wire
         let target = engine.target
-        let task = Task { [weak self] () -> HermesChatTranscript? in
+        openRead = Task { [weak self] in
             let rows = try? await wire.sessionMessages(key, profile: profile, offset: nil)
             guard let self, let rows, !Task.isCancelled, engine.target == target,
-                  history.newestCoverage == nil else { return nil }
+                  history.newestCoverage == nil else { return }
             history.mergeNewest(rows, reachedStart: rows.count < HermesREST.transcriptPageSize)
             historyTurns = turnsStarted
-            return historyTranscript()
+            delegate?.hermesReplaceTranscript(historyTranscript())
         }
-        openRead = task
-        return await task.value
     }
 
     /// The one attach in flight. Cancelled by leaving, so one that has not begun never does.
@@ -2196,7 +2194,7 @@ extension HermesChatTurnCoordinator: HermesConversationOwner {
             if compactionPending { history = HermesTranscriptHistory() }
             // The open sent this read beside the attach: join it rather than reading again.
             if let openRead {
-                _ = await openRead.value
+                await openRead.value
                 self.openRead = nil
             }
             // A read that failed, or a host that answered with no rows, leaves the rebuild

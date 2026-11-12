@@ -3319,15 +3319,7 @@ final class ChatViewModel {
         errorMessage = nil
         defer { isLoading = false }
         let retriesHistory = hermes.hasHistoryFailure
-        // The transcript is a read of its own, sent beside the attach: the chat opens on its
-        // rows in the read's time, and the handshake that follows fills in the live state
-        // instead of gating them (#HMX-2).
-        let attaching = Task { await hermes.activate() }
-        if let opened = await hermes.readNewestRowsForOpen() {
-            hermesReplaceTranscript(opened)
-            isLoading = false
-        }
-        await attaching.value
+        await hermes.activate()
         if retriesHistory { await hermes.retryHistoryIfFailed() }
     }
 
