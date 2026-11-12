@@ -151,6 +151,23 @@ import Foundation
         return messages
     }
 
+    /// The newest page, for a chat's open. It goes out before the socket's generation is fixed
+    /// (the attach that follows bumps it), so it is not tied to `attempt`: a read that outlives a
+    /// reconnect is still a valid read, and the reply is merged only if the open is still the
+    /// open. Writes keep `attempt`; this one does not need it.
+    func newestMessages(_ key: String, profile: String) async throws -> [BotJSON]? {
+        let data: Data
+        do {
+            data = try await http.data(.sessionMessages(key: key, profile: profile, offset: nil))
+        } catch BotFailure.rejected(404) {
+            return nil
+        }
+        guard let messages = (try? JSONDecoder().decode(BotJSON.self, from: data))?["messages"].list else {
+            throw BotFailure.unsupported
+        }
+        return messages
+    }
+
     /// Listen's speech (#1072). The host may install its TTS engine on first use, so this runs
     /// on the provisioning deadline. Its reply is read bounded, like a download, and decoded off
     /// the main actor. Plain HTTP, so it needs no attached socket and reaches the host while the

@@ -466,8 +466,14 @@ struct HermesLostTurn: Equatable {
         let wire = engine.wire
         let target = engine.target
         openRead = Task { [weak self] in
-            let rows = try? await wire.sessionMessages(key, profile: profile, offset: nil)
-            print("HMX-2 open read: \(rows?.count ?? -1) rows back")
+            let rows: [BotJSON]?
+            do {
+                rows = try await wire.newestMessages(key, profile: profile)
+                print("HMX-2 open read: \(rows?.count ?? -1) rows back")
+            } catch {
+                rows = nil
+                print("HMX-2 open read: \(error)")
+            }
             guard let self, let rows, !Task.isCancelled, engine.target == target,
                   history.newestCoverage == nil else { return }
             history.mergeNewest(rows, reachedStart: rows.count < HermesREST.transcriptPageSize)
